@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from textractcaller.t_call import Textract_Types
 from typing import List
-import trp
+from trp.trp2 import TDocumentSchema, TDocument, TGeometry, TextractBlockTypes
 
 
 @dataclass
@@ -25,7 +25,7 @@ class BoundingBox:
 
     def __init__(
         self,
-        geometry: trp.Geometry,
+        geometry: TGeometry,
         document_dimensions: DocumentDimensions,
         box_type: Textract_Types,
         page_number: int,
@@ -36,10 +36,10 @@ class BoundingBox:
             raise ValueError("need geometry and document_dimensions to create BoundingBox object")
         self.__box_type = box_type
         self.__page_number = page_number
-        bbox_width = geometry.boundingBox.width
-        bbox_height = geometry.boundingBox.height
-        bbox_left = geometry.boundingBox.left
-        bbox_top = geometry.boundingBox.top
+        bbox_width = geometry.bounding_box.width
+        bbox_height = geometry.bounding_box.height
+        bbox_left = geometry.bounding_box.left
+        bbox_top = geometry.bounding_box.top
         self.__xmin: int = round(bbox_left * document_dimensions.doc_width)
         self.__ymin: int = round(bbox_top * document_dimensions.doc_height)
         self.__xmax: int = round(self.__xmin + (bbox_width * document_dimensions.doc_width))
@@ -48,7 +48,7 @@ class BoundingBox:
         self.__text: str = text
 
     def __str__(self):
-        return f"BoundingBox(box_type='{self.__box_type}', page_number={self.page_number}, xmin={self.__xmin}, ymin={self.__ymin}, xmax={self.__xmax}, ymax={self.__ymax})"
+        return f"bounding_box(box_type='{self.__box_type}', page_number={self.page_number}, xmin={self.__xmin}, ymin={self.__ymin}, xmax={self.__xmax}, ymax={self.__ymax})"
 
     def __repr__(self):
         return self.__str__()
@@ -92,18 +92,18 @@ class BoundingBox:
 
 
 def get_bounding_boxes(
-    textract_json: dict,
+    textract_document: TDocument,
     overlay_features: List[Textract_Types],
     document_dimensions: List[DocumentDimensions],
 ) -> List[BoundingBox]:
-    doc = trp.Document(textract_json)
     bounding_box_list: List[BoundingBox] = list()
     page_number: int = 0
-    for page in doc.pages:
+
+    for page in textract_document.pages:
         page_dimensions = document_dimensions[page_number]
         page_number += 1
         if (Textract_Types.WORD in overlay_features or Textract_Types.LINE in overlay_features):
-            for line in page.lines:
+            for line in textract_document.lines(page):
                 if Textract_Types.LINE in overlay_features:
                     if line:
                         bounding_box_list.append(
@@ -116,7 +116,8 @@ def get_bounding_boxes(
                                 text=line.text,
                             ))
                 if Textract_Types.WORD in overlay_features:
-                    for word in line.words:
+                    words_of_line = textract_document.filter_blocks_by_type(textract_document.get_child_relations(line),[TextractBlockTypes.WORD])
+                    for word in words_of_line:
                         if word:
                             bounding_box_list.append(
                                 BoundingBox(
@@ -129,32 +130,33 @@ def get_bounding_boxes(
                                 ))
 
         if any([x for x in overlay_features if x in [Textract_Types.FORM, Textract_Types.KEY, Textract_Types.VALUE]]):
-            for field in page.form.fields:
+            #for field in page.form.fields:
+            for field_key in textract_document.keys(page):
                 if any([x for x in overlay_features if x in [Textract_Types.FORM, Textract_Types.KEY]]):
-                    if field and field.key:
-                        bounding_box_list.append(
-                            BoundingBox(
-                                geometry=field.key.geometry,
-                                document_dimensions=page_dimensions,
-                                box_type=Textract_Types.KEY,
-                                page_number=page_number,
-                                confidence=field.key.confidence,
-                                text=field.key.text,
-                            ))
+                    bounding_box_list.append(
+                        BoundingBox(
+                            geometry=field_key.geometry,
+                            document_dimensions=page_dimensions,
+                            box_type=Textract_Types.KEY,
+                            page_number=page_number,
+                            confidence=field_key.confidence,
+                            text=field_key.text,
+                        ))
                 if any([x for x in overlay_features if x in [Textract_Types.FORM, Textract_Types.VALUE]]):
-                    if field and field.value:
+                    field_values = textract_document.get_blocks_for_relationships(field_key.get_relationships_for_type("VALUE"))
+                    for field_value in field_values:
                         bounding_box_list.append(
                             BoundingBox(
-                                geometry=field.value.geometry,
+                                geometry=field_value.geometry,
                                 document_dimensions=page_dimensions,
                                 box_type=Textract_Types.VALUE,
                                 page_number=page_number,
-                                confidence=field.value.confidence,
-                                text=field.value.text,
+                                confidence=field_value.confidence,
+                                text=field_value.text,
                             ))
 
         if any([x for x in overlay_features if x in [Textract_Types.TABLE, Textract_Types.CELL]]):
-            for table in page.tables:
+            for table in textract_document.tables(page):
                 if Textract_Types.TABLE in overlay_features:
                     bounding_box_list.append(
                         BoundingBox(
@@ -165,19 +167,30 @@ def get_bounding_boxes(
                             confidence=table.confidence,
                             text="table",
                         ))
-
                 if Textract_Types.CELL in overlay_features:
-                    for _, row in enumerate(table.rows):
-                        for _, cell in enumerate(row.cells):
-                            if cell:
-                                bounding_box_list.append(
-                                    BoundingBox(
-                                        geometry=cell.geometry,
-                                        document_dimensions=page_dimensions,
-                                        box_type=Textract_Types.CELL,
-                                        page_number=page_number,
-                                        confidence=cell.confidence,
-                                        text="cell",
-                                    ))
+                    cells_of_table = textract_document.filter_blocks_by_type(textract_document.get_child_relations(table),[TextractBlockTypes.CELL])
+                    for cell in cells_of_table:
+                        bounding_box_list.append(
+                                        BoundingBox(
+                                            geometry=cell.geometry,
+                                            document_dimensions=page_dimensions,
+                                            box_type=Textract_Types.CELL,
+                                            page_number=page_number,
+                                            confidence=cell.confidence,
+                                            text="cell",
+                                        ))
+        if (Textract_Types.QUERIES in overlay_features):
+            for query in textract_document.queries(page):
+                query_answers = textract_document.get_answers_for_query(query)
+                for query_answer in query_answers:
+                    bounding_box_list.append(
+                                BoundingBox(
+                                    geometry=query_answer.geometry,
+                                    document_dimensions=page_dimensions,
+                                    box_type=Textract_Types.QUERIES,
+                                    page_number=page_number,
+                                    confidence=query_answer.confidence,
+                                    text=query_answer.text,
+                                ))
 
     return bounding_box_list

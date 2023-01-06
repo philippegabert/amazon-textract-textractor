@@ -1,7 +1,9 @@
 import io
 import os
 import sys
-from textractoverlayer.t_overlay import DocumentDimensions
+from typing import List
+#from textractoverlayer.t_overlay import DocumentDimensions
+from .t_overlay import DocumentDimensions
 import boto3
 
 # Conditionally add /opt to the PYTHON PATH
@@ -16,17 +18,21 @@ image_suffixes = ['.png', '.jpg', '.jpeg']
 supported_suffixes = pdf_suffixes + image_suffixes
 
 
-def get_size_from_filestream(fs, ext) -> DocumentDimensions:
+def get_size_from_filestream(fs, ext) -> List[DocumentDimensions]:
     if ext in image_suffixes:
         img = Image.open(fs)
-        return DocumentDimensions(doc_width=img.width, doc_height=img.height)
+        return [DocumentDimensions(doc_width=img.width, doc_height=img.height)]
     else:
         input1 = PdfReader(fs)
-        pdf_page = input1.pages[0].mediabox
-        return DocumentDimensions(doc_width=int(pdf_page[2]), doc_height=int(pdf_page[3]))
+        pdf_dimensions:List[DocumentDimensions] = []
+        for page in input1.pages:
+            pdf_page = page.mediabox
+            pdf_dimensions.append(DocumentDimensions(doc_width=int(pdf_page[2]), doc_height=int(pdf_page[3])))
+            
+        return pdf_dimensions
 
 
-def get_size_from_s3(s3_bucket, s3_key) -> DocumentDimensions:
+def get_size_from_s3(s3_bucket, s3_key) -> List[DocumentDimensions]:
     _, ext = os.path.splitext(s3_key)
     if ext in supported_suffixes:
         s3 = boto3.client('s3')
@@ -49,7 +55,7 @@ def get_filename_from_document(input_document: str):
     return file_name, suffix
 
 
-def get_size_from_document(input_document: str) -> DocumentDimensions:
+def get_size_from_document(input_document: str) -> List[DocumentDimensions]:
     if len(input_document) > 7 and input_document.lower().startswith('s3://'):
         input_document = input_document.replace('s3://', '')
         s3_bucket, s3_key = input_document.split('/', 1)
@@ -58,11 +64,11 @@ def get_size_from_document(input_document: str) -> DocumentDimensions:
         return get_size_from_document(input_document)
 
 
-def get_width_height_from_s3_object(s3_bucket, s3_key) -> DocumentDimensions:
+def get_width_height_from_s3_object(s3_bucket, s3_key) -> List[DocumentDimensions]:
     return get_size_from_s3(s3_bucket, s3_key)
 
 
-def get_width_height_from_file(filepath) -> DocumentDimensions:
+def get_width_height_from_file(filepath) -> List[DocumentDimensions]:
     _, ext = os.path.splitext(filepath)
     if ext in supported_suffixes:
         with open(filepath, 'rb') as input_fs:
