@@ -2,8 +2,7 @@ import io
 import os
 import sys
 from typing import List
-#from textractoverlayer.t_overlay import DocumentDimensions
-from .t_overlay import DocumentDimensions
+from textractoverlayer.t_overlay import DocumentDimensions
 import boto3
 
 # Conditionally add /opt to the PYTHON PATH
